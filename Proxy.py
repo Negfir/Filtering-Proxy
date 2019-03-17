@@ -1,113 +1,295 @@
-import socket, sys
-from _thread import *
-import base64
+#!/usr/bin/env python3
 
-portNum= 5050;
+VERSION = "v0.2.0"
 
-max_con=5
-buffer_size=8000
+"""
+Copyright (c) 2013 devunt
+Permission is hereby granted, free of charge, to any person
+obtaining a copy of this software and associated documentation
+files (the "Software"), to deal in the Software without
+restriction, including without limitation the rights to use,
+copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the
+Software is furnished to do so, subject to the following
+conditions:
+The above copyright notice and this permission notice shall be
+included in all copies or substantial portions of the Software.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
+OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
+HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+OTHER DEALINGS IN THE SOFTWARE.
+"""
 
-#data=0
+import sys
+
+from argparse import ArgumentParser
+from socket import TCP_NODELAY
+from time import time
+from traceback import print_exc
+import asyncio
+import logging
+import random
+import functools
+import re
+import urllib.request
 
 
-def recieve():
+REGEX_HOST           = re.compile(r'(.+?):([0-9]{1,5})')
+REGEX_CONTENT_LENGTH = re.compile(r'\r\nContent-Length: ([0-9]+)\r\n', re.IGNORECASE)
+REGEX_CONNECTION     = re.compile(r'\r\nConnection: (.+)\r\n', re.IGNORECASE)
+
+clients = {}
+
+logging.basicConfig(level=logging.INFO, format='[%(asctime)s] {%(levelname)s} %(message)s')
+logging.getLogger('asyncio').setLevel(logging.CRITICAL)
+logger = logging.getLogger('warp')
+verbose = 0
+
+
+def accept_client(client_reader, client_writer, *, loop=None):
+    ident = hex(id(client_reader))[-6:]
+    task = asyncio.async(process_warp(client_reader, client_writer, loop=loop), loop=loop)
+    clients[task] = (client_reader, client_writer)
+    started_time = time()
+
+    def client_done(task):
+        del clients[task]
+        client_writer.close()
+        logger.debug('[%s] Connection closed (took %.5f seconds)' % (ident, time() - started_time))
+
+    logger.debug('[%s] Connection started' % ident)
+    task.add_done_callback(client_done)
+
+
+@asyncio.coroutine
+def process_warp(client_reader, client_writer, *, loop=None):
+    ident = str(hex(id(client_reader)))[-6:]
+
+    header = ''
+    payload = b''
     try:
-        ser = '127.0.0.1'
-        received = ""
-        serverSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)  ############
-        serverSocket.bind((ser, portNum))
-        serverSocket.listen(max_con)
-
-        print("[*] Initializing Sockets... Done")
-        print("[*] Sockets Binded Successfully...")
-        print("[*] Server Started Successfully [ %d ]\n" % (portNum))
-    except Exception as e:
-        print ("error",e)
-        sys.exit(2)
-
-    while 1:
-        try:
-            conn, addr =serverSocket.accept()
-            data= conn.recv(buffer_size)
-            start_new_thread(conn_stab,(conn,data,addr))
-        except KeyboardInterrupt:
-            serverSocket.close()
-            print("\n[*] Proxy Server Shutting Down..")
-            sys.exit(1)
-    serverSocket.close()
-
-def conn_stab(conn, data, addr):
-    try:
-        #print(data)
-        try:
-            data = data.decode("ascii")
-        except AttributeError:
-            pass
-        first_line = data.split('\n')[0]
-        if first_line.strip():
-            url= first_line.split(' ')[1]
-            http_pos = url.find("://")
-
-            if(http_pos==-1):
-                temp=url
-            else:
-                temp =url[(http_pos+3):]
-            port_pos=temp.find(":")
-            webserver_pos=temp.find("/")
-            if webserver_pos==-1:
-                webserver_pos=len(temp)
-            webserver=""
-            port=-1
-            if (port_pos==-1 or webserver_pos < port_pos):
-                port =80
-                webserver=temp[:webserver_pos]
-            else:
-                port = int((temp[(port_pos+1):])[:webserver_pos-port_pos-1])
-                webserver=temp[:port_pos]
-
-            #print(webserver, port, conn, addr, data)
-
-
-
-            proxy(webserver,port,conn,addr,data)
-
-
-    except Exception as e:
-        print(e)
-        pass
-
-def proxy(webserver, port, conn,addr, data):
-    try:
-        # for x in data:
-        #     print("\n", x)
-
-        print(data)
-        serverSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)  ############
-        serverSocket.connect((webserver, port))
-        try:
-            data = data.encode("ascii")
-        except AttributeError:
-            pass
-        serverSocket.send(data)
-
-        while 1:
-            reply= serverSocket.recv(buffer_size)
-
-            if(len(reply)>0):
-                conn.send(reply)
-
-                dar=float(len(reply))
-                dar=float(dar / 1024)
-                dar ="%.3s" %(str(dar))
-                dar="%s KB" % (dar)
-                print("[*] Request Done: %s => %s <=" % (str(addr[0]),str(dar)))
-            else:
+        RECV_MAX_RETRY = 3
+        recvRetry = 0
+        while True:
+            line = yield from client_reader.readline()
+            if not line:
+                if len(header) == 0 and recvRetry < RECV_MAX_RETRY:
+                    # handle the case when the client make connection but sending data is delayed for some reasons
+                    recvRetry += 1
+                    yield from asyncio.sleep(0.2, loop=loop)
+                    continue
+                else:
+                    break
+            if line == b'\r\n':
                 break
-        serverSocket.close()
-        conn.close()
-    except socket.error as e:
-        serverSocket.close()
-        conn.close()
-        sys.exit(1)
+            if line != b'':
+                header += line.decode()
 
-recieve()
+        m = REGEX_CONTENT_LENGTH.search(header)
+        if m:
+            cl = int(m.group(1))
+            while (len(payload) < cl):
+                payload += yield from client_reader.read(1024)
+    except:
+        print_exc()
+
+    if len(header) == 0:
+        logger.debug('[%s] !!! Task reject (empty request)' % ident)
+        return
+
+    req = header.split('\r\n')[:-1]
+    if len(req) < 4:
+        logger.debug('[%s] !!! Task reject (invalid request)' % ident)
+        return
+    head = req[0].split(' ')
+    if head[0] == 'CONNECT': # https proxy
+        try:
+
+            logger.info('%sBYPASSING <%s %s> (SSL connection)' %
+                ('[%s] ' % ident if verbose >= 1 else '', head[0], head[1]))
+            m = REGEX_HOST.search(head[1])
+            host = m.group(1)
+            port = int(m.group(2))
+            req_reader, req_writer = yield from asyncio.open_connection(host, port, ssl=False, loop=loop)
+            client_writer.write(b'HTTP/1.1 200 Connection established\r\n\r\n')
+            @asyncio.coroutine
+            def relay_stream(reader, writer):
+                try:
+                    while True:
+                        line = yield from reader.read(1024)
+                        if len(line) == 0:
+                            break
+                        writer.write(line)
+                except:
+                    print_exc()
+            tasks = [
+                asyncio.async(relay_stream(client_reader, req_writer), loop=loop),
+                asyncio.async(relay_stream(req_reader, client_writer), loop=loop),
+            ]
+            yield from asyncio.wait(tasks, loop=loop)
+        except:
+            print_exc()
+        finally:
+            return
+    phost = False
+    sreq = []
+    sreqHeaderEndIndex = 0
+    for line in req[1:]:
+        headerNameAndValue = line.split(': ', 1)
+        if len(headerNameAndValue) == 2:
+            headerName, headerValue = headerNameAndValue
+        else:
+            headerName, headerValue = headerNameAndValue[0], None
+
+        if headerName.lower() == "host":
+            phost = headerValue
+        elif headerName.lower() == "connection":
+            if headerValue.lower() in ('keep-alive', 'persist'):
+                # current version of this program does not support the HTTP keep-alive feature
+                sreq.append("Connection: close")
+            else:
+                sreq.append(line)
+        elif headerName.lower() != 'proxy-connection':
+            sreq.append(line)
+            if len(line) == 0 and sreqHeaderEndIndex == 0:
+                sreqHeaderEndIndex = len(sreq) - 1
+    if sreqHeaderEndIndex == 0:
+        sreqHeaderEndIndex = len(sreq)
+
+    m = REGEX_CONNECTION.search(header)
+    if not m:
+        sreq.insert(sreqHeaderEndIndex, "Connection: close")
+
+    if not phost:
+        phost = '127.0.0.1'
+    path = head[1][len(phost)+7:]
+    print("heyyyyyyyyyyyyyyyyyy", path, " and jjjjjjjjj", head[1])
+    52
+
+    searchfile = open("link.txt", "r")
+    for line in searchfile:
+        #print("bbbbbbbbb", line)
+        if head[1] in line:
+            print ("FILTER",line)
+            return
+    searchfile.close()
+    # if (head[1]=="http://airnow.tehran.ir/"):
+    #     head[1]="https://ceit.aut.ac.ir/~9431018/filter.html"
+    #     return
+    logger.info('%sWARPING <%s %s>' % ('[%s] ' % ident if verbose >= 1 else '', head[0], head[1]))
+
+    new_head = ' '.join([head[0], path, head[2]])
+
+    m = REGEX_HOST.search(phost)
+    if m:
+        host = m.group(1)
+        port = int(m.group(2))
+    else:
+        host = phost
+        port = 80
+
+    try:
+        req_reader, req_writer = yield from asyncio.open_connection(host, port, flags=TCP_NODELAY, loop=loop)
+        req_writer.write(('%s\r\n' % new_head).encode())
+        yield from req_writer.drain()
+        yield from asyncio.sleep(0.2, loop=loop)
+
+        def generate_dummyheaders():
+            def generate_rndstrs(strings, length):
+                return ''.join(random.choice(strings) for _ in range(length))
+            import string
+            return ['X-%s: %s\r\n' % (generate_rndstrs(string.ascii_uppercase, 16),
+                generate_rndstrs(string.ascii_letters + string.digits, 128)) for _ in range(32)]
+
+        req_writer.writelines(list(map(lambda x: x.encode(), generate_dummyheaders())))
+        yield from req_writer.drain()
+
+        req_writer.write(b'Host: ')
+        yield from req_writer.drain()
+        def feed_phost(phost):
+            i = 1
+            while phost:
+                yield random.randrange(2, 4), phost[:i]
+                phost = phost[i:]
+                i = random.randrange(2, 5)
+        for delay, c in feed_phost(phost):
+            yield from asyncio.sleep(delay / 10.0, loop=loop)
+            req_writer.write(c.encode())
+            yield from req_writer.drain()
+        req_writer.write(b'\r\n')
+        req_writer.writelines(list(map(lambda x: (x + '\r\n').encode(), sreq)))
+        req_writer.write(b'\r\n')
+        if payload != b'':
+            req_writer.write(payload)
+            req_writer.write(b'\r\n')
+        yield from req_writer.drain()
+
+        try:
+            while True:
+                buf = yield from req_reader.read(1024)
+                if len(buf) == 0:
+                    break
+                client_writer.write(buf)
+        except:
+            print_exc()
+
+    except:
+        print_exc()
+
+    client_writer.close()
+
+
+@asyncio.coroutine
+def start_warp_server(host, port, *, loop = None):
+    try:
+        accept = functools.partial(accept_client, loop=loop)
+        server = yield from asyncio.start_server(accept, host=host, port=port, loop=loop)
+    except OSError as ex:
+        logger.critical('!!! Failed to bind server at [%s:%d]: %s' % (host, port, ex.args[1]))
+        raise
+    else:
+        logger.info('Server bound at [%s:%d].' % (host, port))
+        return server
+
+
+def main():
+    """CLI frontend function.  It takes command line options e.g. host,
+    port and provides `--help` message.
+    """
+    parser = ArgumentParser(description='Simple HTTP transparent proxy')
+    parser.add_argument('-H', '--host', default='127.0.0.1',
+                      help='Host to listen [default: %(default)s]')
+    parser.add_argument('-p', '--port', type=int, default=8800,
+                      help='Port to listen [default: %(default)d]')
+    parser.add_argument('-v', '--verbose', action='count', default=0,
+                      help='Print verbose')
+    args = parser.parse_args()
+    if not (1 <= args.port <= 65535):
+        parser.error('port must be 1-65535')
+    if args.verbose >= 3:
+        parser.error('verbose level must be 1-2')
+    if args.verbose >= 1:
+        logger.setLevel(logging.DEBUG)
+    if args.verbose >= 2:
+        logging.getLogger('warp').setLevel(logging.DEBUG)
+        logging.getLogger('asyncio').setLevel(logging.DEBUG)
+    global verbose
+    verbose = args.verbose
+    loop = asyncio.get_event_loop()
+    try:
+        loop.run_until_complete(start_warp_server(args.host, args.port))
+        loop.run_forever()
+    except OSError:
+        pass
+    except KeyboardInterrupt:
+        print('bye')
+    finally:
+        loop.close()
+
+
+if __name__ == '__main__':
+    exit(main())
