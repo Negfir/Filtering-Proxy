@@ -385,7 +385,7 @@ class inputdialogdemo(QWidget):
             self.le1.setText(str(text))
 
     def delGroup(self):
-        text, ok = QInputDialog.getText(self, 'Site Input Dialog', 'Enter your site:')
+        text, ok = QInputDialog.getText(self, 'Group Input Dialog', 'Enter Group Name:')
         if ok:
             print(item)
             if (text == "Work"):
