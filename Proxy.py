@@ -11,6 +11,8 @@ import logging
 import random
 import functools
 import re
+import ctypes
+import webbrowser
 import PyQt5
 from PyQt5.QtGui import *
 from PyQt5.QtWidgets import *
@@ -18,15 +20,19 @@ from PyQt5 import QtGui
 import urllib.request
 from PyQt5.QtGui import QIcon
 
-work =[]
-lifeStyle=[]
-sport=[]
-education =[]
+work =["airnow.tehran.ir, lastsecond.ir"]
+lifeStyle=["www.digistyle.com", "digikala.com"]
+sport=["goal.com"]
+education =["coursera.org"]
+misc=[]
 full_list=[]
 full_list.append(work)
 full_list.append(lifeStyle)
 full_list.append(sport)
 full_list.append(education)
+full_list.append(misc)
+flags = [1,1,1,1,1]
+
 REGEX_HOST           = re.compile(r'(.+?):([0-9]{1,5})')
 REGEX_CONTENT_LENGTH = re.compile(r'\r\nContent-Length: ([0-9]+)\r\n', re.IGNORECASE)
 REGEX_CONNECTION     = re.compile(r'\r\nConnection: (.+)\r\n', re.IGNORECASE)
@@ -58,6 +64,8 @@ def accept_client(client_reader, client_writer, *, loop=None):
 def process_warp(client_reader, client_writer, *, loop=None):
     ident = str(hex(id(client_reader)))[-6:]
 
+
+
     header = ''
     payload = b''
     try:
@@ -65,6 +73,7 @@ def process_warp(client_reader, client_writer, *, loop=None):
         recvRetry = 0
         while True:
             line = yield from client_reader.readline()
+
             if not line:
                 if len(header) == 0 and recvRetry < RECV_MAX_RETRY:
                     # handle the case when the client make connection but sending data is delayed for some reasons
@@ -98,15 +107,23 @@ def process_warp(client_reader, client_writer, *, loop=None):
     if head[0] == 'CONNECT': # https proxy
         try:
             searchfile2 = open("link.txt", "r")
-            for list in full_list:
-                for s in list:
-                    if str(head[1]).find(s) == -1:
-                        print("No here!  ",str(head[1]),s)
 
-                    else:
-                        print("Found string.")
-                        print("FILTER", s)
-                        return
+            for list in full_list:
+                if (full_list.index(list)==1):
+                    for s in list:
+                        if str(head[1]).find(s) == -1:
+                            print("No here!  ",str(head[1]),s)
+
+                        else:
+                            #webbrowser.open('https://ceit.aut.ac.ir/~9431018/filter.html',new=2)
+                            print("Found string.")
+
+                            ctypes.windll.user32.MessageBoxW(0, "------This Site is Filter------", "Warning", 1)
+
+                            print("FILTER", s)
+
+                            return
+
 
                 # #print(head[1])
                 # if str(head[1]).find(str(line)) == -1:
@@ -182,7 +199,9 @@ def process_warp(client_reader, client_writer, *, loop=None):
                 print("No here!  ", str(head[1]), s)
 
             else:
+                #webbrowser.open('https://ceit.aut.ac.ir/~9431018/filter.html',new=2)
                 print("Found string.")
+                ctypes.windll.user32.MessageBoxW(0, "------This Site is Filter------", "Warning", 1)
                 print("FILTER", s)
                 return
     searchfile.close()
@@ -290,6 +309,8 @@ def main():
     verbose = args.verbose
     loop = asyncio.get_event_loop()
     try:
+
+
         loop.run_until_complete(start_warp_server(args.host, args.port))
         loop.run_forever()
     except OSError:
@@ -323,11 +344,11 @@ class inputdialogdemo(QWidget):
 
         self.le1 = QLineEdit()
         layout.addRow(self.btn1, self.le1)
-        # self.btn2 = QPushButton("New Group")
-        # self.btn2.clicked.connect(self.getint)
+        self.btn2 = QPushButton("Delete Group")
+        self.btn2.clicked.connect(self.delGroup)
 
         self.le2 = QLineEdit()
-        #layout.addRow(self.btn2, self.le2)
+        layout.addRow(self.btn2, self.le2)
         self.setLayout(layout)
         self.setWindowTitle("Add sites")
 
@@ -348,32 +369,41 @@ class inputdialogdemo(QWidget):
             if (item == "Work"):
                 work.append(str(text))
                 print("added to work")
-            if (item == "Sport"):
+            elif (item == "Sport"):
                 sport.append(str(text))
                 print("added to Sport")
-            if (item == "Lifestyle"):
+            elif (item == "Lifestyle"):
                 lifeStyle.append(str(text))
                 print("added to Lifestyle")
-            if (item == "Education"):
+            elif (item == "Education"):
                 education.append(str(text))
                 print("added to Education")
+            else:
+                misc.append(str(text))
+                print("added to Misc")
+
             self.le1.setText(str(text))
-            # searchfile = open("link.txt", "a")
-            # searchfile.write(str(text))
-            # searchfile.write("\n")
-            # searchfile.close()
+
+    def delGroup(self):
+        text, ok = QInputDialog.getText(self, 'Site Input Dialog', 'Enter your site:')
+        if ok:
+            print(item)
+            if (text == "Work"):
+                del full_list[0]
+                print("deleted work")
+            elif (text == "Sport"):
+                del full_list[1]
+                print("deleted Sport")
+            elif (text == "Lifestyle"):
+                del full_list[2]
+                print("deleted Lifestyle")
+            elif (text == "Education"):
+                del full_list[3]
+                print("deleted Education")
 
 
 
-    # def getint(self):
-    #     text, ok = QInputDialog.getText(self, 'Group input', 'Enter your Group:')
-    #
-    #     #if ok:
-    #         #items.append(str(text))
-    #
-    # def on_button_clicked(self):
-    #     print('You clicked the button!')
-    #     #main()
+
 
 
 def main1():
@@ -389,28 +419,3 @@ def main1():
 if __name__ == '__main__':
     main1()
     main()
-    # items = ("Work", "Sport", "Lifestyle", "Education",)
-    #
-    # item, ok = QInputDialog.getItem(self,"select input dialog",
-    #                                 "list of languages", items, 0, False)
-    #
-    # if ok and item:
-    #     print("click")
-    #
-    # app = QApplication([])
-    # button = QPushButton('Click')
-    #
-    # def on_button_clicked():
-    #     #alert.setText('You clicked the button!')
-    #     main()
-    #     # alert = QMessageBox()
-    #     # alert.setText('You clicked the button!')
-    #     # alert.exec_()
-    #
-    # button.clicked.connect(on_button_clicked)
-    # button.show()
-    # app.exec_()
-
-
-
-    #main()
