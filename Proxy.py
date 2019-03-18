@@ -11,9 +11,22 @@ import logging
 import random
 import functools
 import re
+import PyQt5
+from PyQt5.QtGui import *
+from PyQt5.QtWidgets import *
+from PyQt5 import QtGui
 import urllib.request
+from PyQt5.QtGui import QIcon
 
-
+work =[]
+lifeStyle=[]
+sport=[]
+education =[]
+full_list=[]
+full_list.append(work)
+full_list.append(lifeStyle)
+full_list.append(sport)
+full_list.append(education)
 REGEX_HOST           = re.compile(r'(.+?):([0-9]{1,5})')
 REGEX_CONTENT_LENGTH = re.compile(r'\r\nContent-Length: ([0-9]+)\r\n', re.IGNORECASE)
 REGEX_CONNECTION     = re.compile(r'\r\nConnection: (.+)\r\n', re.IGNORECASE)
@@ -85,11 +98,25 @@ def process_warp(client_reader, client_writer, *, loop=None):
     if head[0] == 'CONNECT': # https proxy
         try:
             searchfile2 = open("link.txt", "r")
-            for line in searchfile2:
-                # print("bbbbbbbbb", line)
-                if line in head[1]:
-                    print("FILTER", line)
-                    return
+            for list in full_list:
+                for s in list:
+                    if str(head[1]).find(s) == -1:
+                        print("No here!  ",str(head[1]),s)
+
+                    else:
+                        print("Found string.")
+                        print("FILTER", s)
+                        return
+
+                # #print(head[1])
+                # if str(head[1]).find(str(line)) == -1:
+                #     print("No here!  ",str(head[1]),str(line))
+                #
+                # else:
+                #     print("Found string.")
+                #     print("FILTER", line)
+                #     return
+
             logger.info('%sBYPASSING <%s %s> (SSL connection)' %
                 ('[%s] ' % ident if verbose >= 1 else '', head[0], head[1]))
             m = REGEX_HOST.search(head[1])
@@ -148,15 +175,16 @@ def process_warp(client_reader, client_writer, *, loop=None):
     if not phost:
         phost = '127.0.0.1'
     path = head[1][len(phost)+7:]
-    print("heyyyyyyyyyyyyyyyyyy", path, " and jjjjjjjjj", head[1])
-    52
-
     searchfile = open("link.txt", "r")
-    for line in searchfile:
-        #print("bbbbbbbbb", line)
-        if line in head[1]:
-            print ("FILTER",line)
-            return
+    for list in full_list:
+        for s in list:
+            if str(head[1]).find(s) == -1:
+                print("No here!  ", str(head[1]), s)
+
+            else:
+                print("Found string.")
+                print("FILTER", s)
+                return
     searchfile.close()
     # if (head[1]=="http://airnow.tehran.ir/"):
     #     head[1]="https://ceit.aut.ac.ir/~9431018/filter.html"
@@ -272,5 +300,117 @@ def main():
         loop.close()
 
 
+# import sys
+from PyQt5.QtCore import *
+from PyQt5.QtGui import *
+items = ("Work", "Sport", "Lifestyle", "Education")
+item=''
+
+class inputdialogdemo(QWidget):
+    def __init__(self, parent=None):
+
+        super(inputdialogdemo, self).__init__(parent)
+
+
+        layout = QFormLayout()
+        self.btn = QPushButton("Choose your Group")
+        self.btn.clicked.connect(self.getItem)
+
+        self.le = QLineEdit()
+        layout.addRow(self.btn, self.le)
+        self.btn1 = QPushButton("Site Address")
+        self.btn1.clicked.connect(self.gettext)
+
+        self.le1 = QLineEdit()
+        layout.addRow(self.btn1, self.le1)
+        # self.btn2 = QPushButton("New Group")
+        # self.btn2.clicked.connect(self.getint)
+
+        self.le2 = QLineEdit()
+        #layout.addRow(self.btn2, self.le2)
+        self.setLayout(layout)
+        self.setWindowTitle("Add sites")
+
+    def getItem(self):
+
+        global item
+        item, ok = QInputDialog.getItem(self, "select input dialog",
+                                        "list of languages", items, 0, False)
+
+        if ok and item:
+            self.le.setText(item)
+
+    def gettext(self):
+        text, ok = QInputDialog.getText(self, 'Site Input Dialog', 'Enter your site:')
+
+        if ok:
+            print(item)
+            if (item == "Work"):
+                work.append(str(text))
+                print("added to work")
+            if (item == "Sport"):
+                sport.append(str(text))
+                print("added to Sport")
+            if (item == "Lifestyle"):
+                lifeStyle.append(str(text))
+                print("added to Lifestyle")
+            if (item == "Education"):
+                education.append(str(text))
+                print("added to Education")
+            self.le1.setText(str(text))
+            # searchfile = open("link.txt", "a")
+            # searchfile.write(str(text))
+            # searchfile.write("\n")
+            # searchfile.close()
+
+
+
+    # def getint(self):
+    #     text, ok = QInputDialog.getText(self, 'Group input', 'Enter your Group:')
+    #
+    #     #if ok:
+    #         #items.append(str(text))
+    #
+    # def on_button_clicked(self):
+    #     print('You clicked the button!')
+    #     #main()
+
+
+def main1():
+    app = QApplication(sys.argv)
+    ex = inputdialogdemo()
+    ex.show()
+
+    app.exec_()
+
+
+
+
 if __name__ == '__main__':
-    exit(main())
+    main1()
+    main()
+    # items = ("Work", "Sport", "Lifestyle", "Education",)
+    #
+    # item, ok = QInputDialog.getItem(self,"select input dialog",
+    #                                 "list of languages", items, 0, False)
+    #
+    # if ok and item:
+    #     print("click")
+    #
+    # app = QApplication([])
+    # button = QPushButton('Click')
+    #
+    # def on_button_clicked():
+    #     #alert.setText('You clicked the button!')
+    #     main()
+    #     # alert = QMessageBox()
+    #     # alert.setText('You clicked the button!')
+    #     # alert.exec_()
+    #
+    # button.clicked.connect(on_button_clicked)
+    # button.show()
+    # app.exec_()
+
+
+
+    #main()
